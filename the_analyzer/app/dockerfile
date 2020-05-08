@@ -1,0 +1,109 @@
+# Build this image:  docker build -t mpi .
+#
+
+FROM ubuntu:18.04
+# FROM phusion/baseimage
+
+
+# Forked from https://github.com/oweidner/docker.openmpi
+
+ENV USER kaggleuser 
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    HOME=/home/${USER} 
+
+# ------------------------------------------------------------
+# Add an 'kaggleuser' user   AGG
+# ------------------------------------------------------------
+RUN adduser --disabled-password --gecos "" ${USER}
+
+#AGG added openssh-server mirror since it is failing to install
+#RUN printf "deb http://mirrors.kernel.org/ubuntu bionic-updates main" > /etc/apt/sources.list.d/backports.list
+
+#AGG updated to include the MPICH script items instead of openmpi
+RUN apt-get update -y --fix-missing && \
+    apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends apt-utils && \
+    apt-get install -y --no-install-recommends build-essential openssh-server mpich \
+        python3-dev python-numpy python3-pip python-virtualenv python-scipy python3-pip \
+        libmpich-dev python-tk python3-tk vim sudo && \
+    apt-get clean && apt-get purge && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+RUN echo "${USER} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+
+# -----------
+# Set-Up SSH
+# -----------
+
+ENV SSHDIR ${HOME}/.ssh/
+
+RUN mkdir -p ${SSHDIR}
+
+ADD ssh/config ${SSHDIR}/config
+ADD ssh/id_rsa.mpi ${SSHDIR}/id_rsa
+ADD ssh/id_rsa.mpi.pub ${SSHDIR}/id_rsa.pub
+ADD ssh/id_rsa.mpi.pub ${SSHDIR}/authorized_keys
+
+RUN chmod -R 600 ${SSHDIR}* \
+    && chown -R ${USER}:${USER} ${SSHDIR} \
+	&& pip3 install --upgrade pip
+
+RUN  pip3 install --user -U setuptools \
+    && pip3 install --user mpi4py \
+    && pip3 install --user numpy \
+    && pip3 install --user kaggle \
+	&& pip3 install --user scipy \
+	&& pip3 install --user matplotlib \
+	&& pip3 install --user pandas
+
+#copy curitems into continer
+COPY ./ ${HOME}/
+
+#AGG move folders above USER Root otherwise all folder will be set to root
+ADD mpi4py_benchmarks ${HOME}/mpi4py_benchmarks
+
+
+
+RUN sudo chown -R ${USER}:${USER} ${HOME}/${USER}
+
+RUN sudo chmod 777 -R ${HOME}/mpi4py_benchmarks \
+    && sudo chmod 777 -R ${HOME}/code \
+    && sudo chmod 777 -R ${HOME}/db-data \
+    && sudo chmod 777 -R ${HOME}/kaggle \
+    && sudo chmod 777 -R ${HOME}/workdir \
+    && sudo chmod 777 -R ${HOME}/workdir/datasets
+
+
+#RUN sudo chown -R ${USER}:${USER} ${HOME}/mpi4py_benchmarks \
+#    && sudo chown -R ${USER}:${USER} ${HOME}/code \
+#    && sudo chown -R ${USER}:${USER} ${HOME}/db-data \
+#    && sudo chown -R ${USER}:${USER} ${HOME}/kaggle \
+#    && sudo chown -R ${USER}:${USER} ${HOME}/workdir \
+#    && sudo chown -R ${USER}:${USER} ${HOME}/workdir/datasets
+
+# ------------------------------------------------------------
+# Configure SSH and OpenMPI
+# ------------------------------------------------------------
+USER root
+
+RUN mkdir /var/run/sshd
+RUN echo 'root:${USER}' | chpasswd
+RUN sed -i 's/PermitRootLogin without-password/PermitRootLogin yes/' /etc/ssh/sshd_config
+
+# SSH login fix. Otherwise user is kicked off after login
+RUN sed 's@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g' -i /etc/pam.d/sshd
+
+ENV NOTVISIBLE "in users profile"
+RUN echo "export VISIBLE=now" >> /etc/profile
+
+
+RUN rm -fr ${HOME}/.openmpi && mkdir -p ${HOME}/.openmpi
+ADD default-mca-params.conf ${HOME}/.openmpi/mca-params.conf
+RUN chown -R ${USER}:${USER} ${HOME}/.openmpi
+
+
+ENV TRIGGER 1
+
+EXPOSE 22
+CMD ["/usr/sbin/sshd", "-D"]

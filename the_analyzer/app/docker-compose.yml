@@ -1,0 +1,21 @@
+version: '3'
+services:
+  analyzer_run:
+    #path to build content
+    container_name: analyzer
+    build: .
+    ports:
+      - "22"
+    links:
+      - mpi_node
+    networks:
+      - mpi_net
+    volumes:
+      - ./workdir:/home/kaggleuser/workdir
+  mpi_node:
+    build: .
+    networks:
+      - mpi_net  
+networks:
+  mpi_net:
+    driver: bridge
